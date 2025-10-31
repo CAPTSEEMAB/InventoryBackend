@@ -1,10 +1,12 @@
-import os, json, base64
+import os
+import json
+import base64
+import boto3
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
-from supabase import create_client
 from . import auth, products, profiles
 from .utils import ok, bad
 
@@ -14,12 +16,13 @@ load_dotenv(dotenv_path=ROOT_ENV, override=True)
 
 PORT = int(os.getenv("PORT", 3000))
 API_PREFIX = os.getenv("API", "/api")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 app = FastAPI(
     title="Inventory Shop API",
-    description="Full CRUD + Auth using FastAPI & Supabase",
+    description="Full CRUD + Auth using FastAPI & AWS DynamoDB",
     version="1.0.0",
     openapi_url=f"{API_PREFIX}/openapi.json",
     docs_url=f"{API_PREFIX}/docs",
@@ -57,19 +60,32 @@ async def on_exception(_req: Request, exc: Exception):
     print("Unhandled error:", repr(exc))
     return bad(500, "SERVER_ERROR", "Something went wrong", str(exc))
 
-# Startup probe
+
+# Startup probe and DynamoDB table creation
 @app.on_event("startup")
 async def startup_probe():
     try:
-        url = os.getenv("SUPABASE_URL", "")
-        srk = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-        sb = create_client(url, srk)
-        print("🟡 Checking Supabase tables...")
-        for t in ["user_profiles", "inventory_products"]:
-            try:
-                r = sb.table(t).select("id").limit(1).execute()
-                print(f"✅ {t}: {len(r.data)} rows accessible")
-            except Exception as e:
-                print(f"⚠️  {t}: {e}")
+        dynamodb = boto3.resource(
+            'dynamodb',
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION
+        )
+        def ensure_table(table_name, key_name):
+            existing_tables = [t.name for t in dynamodb.tables.all()]
+            if table_name in existing_tables:
+                print(f"✅ Table '{table_name}' already exists.")
+                return
+            print(f"🟡 Creating table '{table_name}'...")
+            table = dynamodb.create_table(
+                TableName=table_name,
+                KeySchema=[{"AttributeName": key_name, "KeyType": "HASH"}],
+                AttributeDefinitions=[{"AttributeName": key_name, "AttributeType": "S"}],
+                BillingMode="PAY_PER_REQUEST"
+            )
+            table.wait_until_exists()
+            print(f"✅ Table '{table_name}' created.")
+        ensure_table("user_profiles", "id")
+        ensure_table("inventory_products", "id")
     except Exception as e:
         print(f"❌ Startup check failed: {e}")

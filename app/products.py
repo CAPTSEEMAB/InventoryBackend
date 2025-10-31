@@ -1,24 +1,17 @@
 import os
+import uuid
 from datetime import datetime, timedelta, date
 from typing import Optional, List, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, HttpUrl
-from supabase import create_client
+import boto3
 
-from .utils import ok, bad, get_current_user
+from .utils import ok, bad
+from .cognito_auth import get_current_cognito_user
 
 router = APIRouter(prefix="/products", tags=["Products"])
-
-# ─────────────────────────────────────────────
-# Supabase configuration
-# ─────────────────────────────────────────────
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-
-db = create_client(SUPABASE_URL, SERVICE_ROLE)
-TABLE = "inventory_products"
 
 # ─────────────────────────────────────────────
 # Models
@@ -32,7 +25,6 @@ class Movement(BaseModel):
     source: Optional[str] = None
     reference_id: Optional[str] = None
 
-
 class ProductCreate(BaseModel):
     name: str
     sku: Optional[str] = None
@@ -45,7 +37,6 @@ class ProductCreate(BaseModel):
     is_active: Optional[bool] = True
     description: Optional[str] = None
     movements: List[Movement] = []
-
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
@@ -70,120 +61,138 @@ class ProductUpdate(BaseModel):
                 "price": 24.99,
                 "reorder_level": 5,
                 "in_stock": 15,
-                "is_active": True,
                 "description": "Stainless steel French press coffee maker with heat-resistant glass and reusable filter."
             }
         }
+
+# ─────────────────────────────────────────────
+# AWS DynamoDB configuration
+# ─────────────────────────────────────────────
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+dynamodb = boto3.resource(
+    "dynamodb",
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    region_name=AWS_REGION,
+)
+TABLE = "inventory_products"
+
+
+# Helpers
+def _table():
+    return dynamodb.Table(TABLE)
+
+
+def _parse_date(s: str) -> date:
+    return datetime.strptime(s, "%Y-%m-%d").date()
 
 
 # ─────────────────────────────────────────────
 # CRUD Endpoints
 # ─────────────────────────────────────────────
-
 @router.get("/")
-def list_products(current=Depends(get_current_user)):
+def list_products(current=Depends(get_current_cognito_user)):
     """List all products"""
     try:
-        res = db.table(TABLE).select("*").order("created_at", desc=True).execute()
-        return ok("Products fetched", res.data)
+        table = _table()
+        resp = table.scan()
+        items = resp.get("Items", [])
+        return ok("Products fetched", items)
     except Exception as e:
         return bad(500, "DB", str(e))
 
 
 @router.post("/", status_code=201)
-def create_product(body: ProductCreate, current=Depends(get_current_user)):
+def create_product(body: ProductCreate, current=Depends(get_current_cognito_user)):
     """Create a new product"""
     try:
-        # ✅ Ensure everything is JSON-serializable (HttpUrl, nested lists, etc.)
-        insert_data = body.model_dump(mode="json")
-        insert_data = jsonable_encoder(insert_data)
-
-        insert_res = db.table(TABLE).insert(insert_data).execute()
-
-        if insert_res.data and len(insert_res.data) > 0:
-            product_id = insert_res.data[0]["id"]
-            fetch_res = db.table(TABLE).select("*").eq("id", product_id).execute()
-            return ok("Product created", fetch_res.data[0] if fetch_res.data else None, status_code=201)
-
-        return bad(500, "DB", "Insert succeeded but no data returned")
+        table = _table()
+        item = body.model_dump(mode="json")
+        item["id"] = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        item.setdefault("movements", [])
+        item["created_at"] = now
+        item["updated_at"] = now
+        # ensure JSON-serializable
+        item = jsonable_encoder(item)
+        table.put_item(Item=item)
+        return ok("Product created", item, status_code=201)
     except Exception as e:
         return bad(500, "DB", str(e))
 
 
 @router.get("/{product_id}")
-def get_product(product_id: str, days: Optional[int] = None, current=Depends(get_current_user)):
+def get_product(product_id: str, days: Optional[int] = None, current=Depends(get_current_cognito_user)):
     """Get single product (optionally filter movements by days)"""
     try:
-        res = db.table(TABLE).select("*").eq("id", product_id).execute()
-        if not res.data:
+        table = _table()
+        resp = table.get_item(Key={"id": product_id})
+        item = resp.get("Item")
+        if not item:
             return bad(404, "NOT_FOUND", "Product not found")
-
-        item = res.data[0]
-        if days:
-            days = max(1, min(365, int(days)))
-            from_date = (date.today() - timedelta(days=days)).isoformat()
-            movements = item.get("movements", []) or []
-            item["movements"] = [m for m in movements if (m.get("movement_date") or "") >= from_date]
-
+        if days is not None:
+            cutoff = date.today() - timedelta(days=days)
+            movs = item.get("movements", []) or []
+            filtered = [
+                m for m in movs
+                if _parse_date(m.get("movement_date")) >= cutoff
+            ]
+            item["movements"] = filtered
         return ok("Product fetched", item)
     except Exception as e:
         return bad(500, "DB", str(e))
 
 
 @router.put("/{product_id}")
-def update_product(product_id: str, body: ProductUpdate, current=Depends(get_current_user)):
+def update_product(product_id: str, body: ProductUpdate, current=Depends(get_current_cognito_user)):
     """
     Update only the fields provided in the request body.
     Does not overwrite missing or null fields unless explicitly given.
     """
     try:
-        # 1️⃣ Fetch existing record
-        existing_res = db.table(TABLE).select("*").eq("id", product_id).execute()
-        if not existing_res.data:
+        table = _table()
+        resp = table.get_item(Key={"id": product_id})
+        existing = resp.get("Item")
+        if not existing:
             return bad(404, "NOT_FOUND", "Product not found")
 
-        existing = existing_res.data[0]
-
-        # 2️⃣ Collect only provided (non-null) fields, JSON-serializable
+        # Collect only provided (non-null) fields, JSON-serializable
         partial = body.model_dump(exclude_unset=True, mode="json")
         updates = {k: v for k, v in partial.items() if v is not None}
 
-        # Movement handling (append/replace) uses plain python lists/dicts (JSON-safe)
-        if body.movements_replace is not None:
-            updates["movements"] = body.movements_replace
-        elif body.movements_append:
+        # Movement handling (append/replace)
+        if "movements_replace" in updates and updates["movements_replace"] is not None:
+            updates["movements"] = updates.pop("movements_replace")
+        elif "movements_append" in updates and updates["movements_append"]:
             current_movs = existing.get("movements", []) or []
-            updates["movements"] = current_movs + body.movements_append
+            append_list = updates.pop("movements_append")
+            updates["movements"] = current_movs + append_list
 
         # updated_at always refreshed
         updates["updated_at"] = datetime.utcnow().isoformat()
 
         # nothing to change?
-        if len(updates) <= 1:  # only has updated_at
+        # if updates only contains updated_at and nothing else, reject
+        if set(updates.keys()) <= {"updated_at"}:
             return bad(400, "NO_FIELDS", "No valid fields provided to update")
 
-        # ✅ Final JSON encoding to avoid “not JSON serializable”
-        updates = jsonable_encoder(updates)
-
-        # 5️⃣ Perform update
-        upd_res = db.table(TABLE).update(updates).eq("id", product_id).execute()
-
-        # 6️⃣ Return updated data
-        if upd_res.data:
-            return ok("Product updated", upd_res.data[0])
-
-        # fallback fetch
-        latest = db.table(TABLE).select("*").eq("id", product_id).execute()
-        return ok("Product updated", latest.data[0] if latest.data else None)
+        # Merge updates into existing item and write back
+        merged = {**existing, **updates}
+        merged = jsonable_encoder(merged)
+        table.put_item(Item=merged)
+        return ok("Product updated", merged)
     except Exception as e:
         return bad(500, "DB", str(e))
 
 
 @router.delete("/{product_id}")
-def delete_product(product_id: str, current=Depends(get_current_user)):
+def delete_product(product_id: str, current=Depends(get_current_cognito_user)):
     """Delete a product"""
     try:
-        db.table(TABLE).delete().eq("id", product_id).execute()
+        table = _table()
+        table.delete_item(Key={"id": product_id})
         return ok("Product deleted", None)
     except Exception as e:
         return bad(500, "DB", str(e))
