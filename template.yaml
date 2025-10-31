@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  FastApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: app.main.handler
+      Runtime: python3.10
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          AWS_ACCESS_KEY_ID:  AWS_ACCESS_KEY_ID
+          AWS_SECRET_ACCESS_KEY:  AWS_SECRET_ACCESS_KEY
+          AWS_REGION:  AWS_REGION
+          COGNITO_USER_POOL_ID:  COGNITO_USER_POOL_ID
+          COGNITO_CLIENT_ID:  COGNITO_CLIENT_ID
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+            Cors:
+              AllowMethods: "'*'"
+              AllowHeaders: "'*'"
+              AllowOrigin: "'*'"
+              MaxAge: 600
+  Role: !GetAtt FastApiFunctionRole.Arn
+  FastApiFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: FastApiDynamoDbCognitoPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:*
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - cognito-idp:*
+                Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
