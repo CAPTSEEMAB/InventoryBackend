@@ -5,20 +5,19 @@ from typing import Optional, List, Literal
 from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, HttpUrl
-from supabase import create_client
 
 from .utils import ok, bad, get_current_user
+from .dynamodb_client import get_db_client
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
 # ─────────────────────────────────────────────
-# Supabase configuration
+# DynamoDB configuration
 # ─────────────────────────────────────────────
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-
-db = create_client(SUPABASE_URL, SERVICE_ROLE)
-TABLE = "inventory_products"
+try:
+    db = get_db_client()
+except Exception as e:
+    raise RuntimeError(f"Failed to connect to DynamoDB: {e}")
 
 # ─────────────────────────────────────────────
 # Models
@@ -58,22 +57,17 @@ class ProductUpdate(BaseModel):
     image_url: Optional[HttpUrl] = None
     is_active: Optional[bool] = None
     description: Optional[str] = None
-    movements_replace: Optional[List[Movement]] = None
-    movements_append: Optional[List[Movement]] = None
+    movements_replace: Optional[List[Movement]] = Field(None, description="Replace all movements")
+    movements_append: Optional[List[Movement]] = Field(None, description="Append movements")
 
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "name": "French Press Coffee Maker 1L",
-                "category": "Equipment",
-                "supplier": "CafeGear Pro",
-                "price": 24.99,
-                "reorder_level": 5,
-                "in_stock": 15,
-                "is_active": True,
-                "description": "Stainless steel French press coffee maker with heat-resistant glass and reusable filter."
-            }
-        }
+
+class MovementCreate(BaseModel):
+    movement_type: Literal["IN", "OUT"]
+    quantity: int
+    movement_date: Optional[str] = None
+    unit_cost: Optional[float] = None
+    note: Optional[str] = None
+    source: Optional[str] = None
 
 
 # ─────────────────────────────────────────────
@@ -84,8 +78,8 @@ class ProductUpdate(BaseModel):
 def list_products(current=Depends(get_current_user)):
     """List all products"""
     try:
-        res = db.table(TABLE).select("*").order("created_at", desc=True).execute()
-        return ok("Products fetched", res.data)
+        products = db.get_all_products(limit=100)
+        return ok("Products fetched", products)
     except Exception as e:
         return bad(500, "DB", str(e))
 
@@ -94,18 +88,16 @@ def list_products(current=Depends(get_current_user)):
 def create_product(body: ProductCreate, current=Depends(get_current_user)):
     """Create a new product"""
     try:
-        # ✅ Ensure everything is JSON-serializable (HttpUrl, nested lists, etc.)
-        insert_data = body.model_dump(mode="json")
-        insert_data = jsonable_encoder(insert_data)
-
-        insert_res = db.table(TABLE).insert(insert_data).execute()
-
-        if insert_res.data and len(insert_res.data) > 0:
-            product_id = insert_res.data[0]["id"]
-            fetch_res = db.table(TABLE).select("*").eq("id", product_id).execute()
-            return ok("Product created", fetch_res.data[0] if fetch_res.data else None, status_code=201)
-
-        return bad(500, "DB", "Insert succeeded but no data returned")
+        # Convert Pydantic model to dict
+        product_data = body.model_dump(mode="json")
+        product_data = jsonable_encoder(product_data)
+        
+        # Create product in DynamoDB
+        product = db.create_product(product_data)
+        return ok("Product created", product, status_code=201)
+        
+    except ValueError as e:
+        return bad(400, "VALIDATION_ERROR", str(e))
     except Exception as e:
         return bad(500, "DB", str(e))
 
@@ -114,18 +106,18 @@ def create_product(body: ProductCreate, current=Depends(get_current_user)):
 def get_product(product_id: str, days: Optional[int] = None, current=Depends(get_current_user)):
     """Get single product (optionally filter movements by days)"""
     try:
-        res = db.table(TABLE).select("*").eq("id", product_id).execute()
-        if not res.data:
+        product = db.get_product_by_id(product_id)
+        if not product:
             return bad(404, "NOT_FOUND", "Product not found")
 
-        item = res.data[0]
+        # Filter movements by days if specified
         if days:
             days = max(1, min(365, int(days)))
             from_date = (date.today() - timedelta(days=days)).isoformat()
-            movements = item.get("movements", []) or []
-            item["movements"] = [m for m in movements if (m.get("movement_date") or "") >= from_date]
+            movements = product.get("movements", []) or []
+            product["movements"] = [m for m in movements if (m.get("movement_date") or "") >= from_date]
 
-        return ok("Product fetched", item)
+        return ok("Product fetched", product)
     except Exception as e:
         return bad(500, "DB", str(e))
 
@@ -137,44 +129,39 @@ def update_product(product_id: str, body: ProductUpdate, current=Depends(get_cur
     Does not overwrite missing or null fields unless explicitly given.
     """
     try:
-        # 1️⃣ Fetch existing record
-        existing_res = db.table(TABLE).select("*").eq("id", product_id).execute()
-        if not existing_res.data:
+        # Check if product exists
+        existing = db.get_product_by_id(product_id)
+        if not existing:
             return bad(404, "NOT_FOUND", "Product not found")
 
-        existing = existing_res.data[0]
-
-        # 2️⃣ Collect only provided (non-null) fields, JSON-serializable
+        # Collect only provided (non-null) fields
         partial = body.model_dump(exclude_unset=True, mode="json")
         updates = {k: v for k, v in partial.items() if v is not None}
 
-        # Movement handling (append/replace) uses plain python lists/dicts (JSON-safe)
+        # Handle movements - append or replace
         if body.movements_replace is not None:
             updates["movements"] = body.movements_replace
         elif body.movements_append:
-            current_movs = existing.get("movements", []) or []
-            updates["movements"] = current_movs + body.movements_append
+            current_movements = existing.get("movements", []) or []
+            updates["movements"] = current_movements + body.movements_append
 
-        # updated_at always refreshed
-        updates["updated_at"] = datetime.utcnow().isoformat()
+        # Remove movement control fields from updates
+        updates.pop("movements_replace", None)
+        updates.pop("movements_append", None)
 
-        # nothing to change?
-        if len(updates) <= 1:  # only has updated_at
+        # Check if there are any updates
+        if not updates:
             return bad(400, "NO_FIELDS", "No valid fields provided to update")
 
-        # ✅ Final JSON encoding to avoid “not JSON serializable”
+        # Ensure JSON serializable
         updates = jsonable_encoder(updates)
 
-        # 5️⃣ Perform update
-        upd_res = db.table(TABLE).update(updates).eq("id", product_id).execute()
+        # Update product in DynamoDB
+        updated_product = db.update_product(product_id, updates)
+        if not updated_product:
+            return bad(500, "DB", "Failed to update product")
 
-        # 6️⃣ Return updated data
-        if upd_res.data:
-            return ok("Product updated", upd_res.data[0])
-
-        # fallback fetch
-        latest = db.table(TABLE).select("*").eq("id", product_id).execute()
-        return ok("Product updated", latest.data[0] if latest.data else None)
+        return ok("Product updated", updated_product)
     except Exception as e:
         return bad(500, "DB", str(e))
 
@@ -183,7 +170,56 @@ def update_product(product_id: str, body: ProductUpdate, current=Depends(get_cur
 def delete_product(product_id: str, current=Depends(get_current_user)):
     """Delete a product"""
     try:
-        db.table(TABLE).delete().eq("id", product_id).execute()
-        return ok("Product deleted", None)
+        success = db.delete_product(product_id)
+        if success:
+            return ok("Product deleted", None)
+        else:
+            return bad(404, "NOT_FOUND", "Product not found")
+    except Exception as e:
+        return bad(500, "DB", str(e))
+
+
+@router.get("/by-category/{category}")
+def get_products_by_category(category: str, current=Depends(get_current_user)):
+    """Get products by category"""
+    try:
+        products = db.get_products_by_category(category)
+        return ok(f"Products in category '{category}' fetched", products)
+    except Exception as e:
+        return bad(500, "DB", str(e))
+
+
+@router.get("/by-sku/{sku}")
+def get_product_by_sku(sku: str, current=Depends(get_current_user)):
+    """Get product by SKU"""
+    try:
+        product = db.get_product_by_sku(sku)
+        if not product:
+            return bad(404, "NOT_FOUND", "Product with this SKU not found")
+        return ok("Product fetched by SKU", product)
+    except Exception as e:
+        return bad(500, "DB", str(e))
+
+
+@router.post("/{product_id}/movements")
+def add_stock_movement(
+    product_id: str, 
+    body: MovementCreate,
+    current=Depends(get_current_user)
+):
+    """Add stock movement to product"""
+    try:
+        success = db.add_stock_movement(
+            product_id, 
+            body.movement_type, 
+            body.quantity, 
+            body.movement_date
+        )
+        if success:
+            # Get updated product to return
+            product = db.get_product_by_id(product_id)
+            return ok("Stock movement added", product)
+        else:
+            return bad(404, "NOT_FOUND", "Product not found")
     except Exception as e:
         return bad(500, "DB", str(e))
