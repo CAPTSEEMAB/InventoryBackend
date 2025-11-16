@@ -1,7 +1,3 @@
-# For AWS Lambda + API Gateway integration
-from mangum import Mangum
-# Expose handler for AWS Lambda
-handler = Mangum(app)
 import os
 import json
 import base64
@@ -120,4 +116,7 @@ async def startup_probe():
         print(f"❌ Startup check failed: {e}")
 
 
-        
+# For AWS Lambda + API Gateway integration
+from mangum import Mangum
+# Expose handler for AWS Lambda
+handler = Mangum(app)
