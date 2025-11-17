@@ -62,7 +62,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 @router.post("/signup")
 def signup(body: SignupBody):
     """
-    Create a new user account with AWS Cognito
+    Create a new user account with AWS Cognito and auto-subscribe to notifications
     """
     if not COGNITO_CONFIGURED:
         return bad(503, "SERVICE_UNAVAILABLE", "Authentication service not configured")
@@ -77,6 +77,35 @@ def signup(body: SignupBody):
         )
         
         if result['success']:
+            # Auto-subscribe new user to product notifications
+            try:
+                from .sns import ProductNotificationService
+                notification_service = ProductNotificationService()
+                
+                # Subscribe the new user's email to SNS notifications
+                import boto3
+                import os
+                sns_client = boto3.client('sns',
+                                        aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+                                        aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+                                        region_name=os.getenv('AWS_SNS_REGION'))
+                
+                # Create/get the topic
+                topic_response = sns_client.create_topic(Name='product-notifications')
+                topic_arn = topic_response['TopicArn']
+                
+                # Subscribe the new user
+                sns_client.subscribe(
+                    TopicArn=topic_arn,
+                    Protocol='email',
+                    Endpoint=body.email
+                )
+                print(f"✅ Auto-subscribed new user to notifications: {body.email}")
+                
+            except Exception as sns_error:
+                print(f"⚠️ Failed to auto-subscribe user to notifications: {sns_error}")
+                # Don't fail signup if SNS subscription fails
+            
             return ok(result['message'], {
                 "token": result.get('token'),
                 "user": result['user'],

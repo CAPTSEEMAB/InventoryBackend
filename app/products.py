@@ -6,13 +6,15 @@ from pydantic import BaseModel, Field, HttpUrl
 from .utils import ok, bad
 from .auth import get_current_user
 from .dynamodb_client import get_db_client
+from .sns import ProductNotificationService
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
 try:
     db = get_db_client()
+    notification_service = ProductNotificationService()
 except Exception as e:
-    raise RuntimeError(f"Failed to connect to DynamoDB: {e}")
+    raise RuntimeError(f"Failed to initialize services: {e}")
 
 class ProductCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200, description="Product name")
@@ -53,6 +55,14 @@ def create_product(body: ProductCreate, current=Depends(get_current_user)):
         product_data = jsonable_encoder(product_data)
         
         product = db.create_product(product_data)
+        
+        # Send SNS notification for new product creation
+        try:
+            notification_service.notify_product_created(product)
+        except Exception as notification_error:
+            # Log notification error but don't fail the product creation
+            print(f"Warning: Failed to send product creation notification: {notification_error}")
+        
         return ok("Product created successfully", product, status_code=201)
         
     except ValueError as e:
