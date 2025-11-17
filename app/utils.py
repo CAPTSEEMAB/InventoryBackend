@@ -1,39 +1,42 @@
+"""
+Utility functions for the Inventory API
+Simplified version without custom JWT - uses AWS Cognito only
+"""
+
 import os
-from datetime import datetime, timedelta
-from jose import jwt
-from fastapi import HTTPException, status, Security
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-JWT_SECRET = os.getenv("JWT_SECRET", "changeme")
-JWT_EXPIRES_HOURS = 3
-
-# Swagger-compatible bearer scheme
-bearer_scheme = HTTPBearer(auto_error=False)
-
 def ok(message: str = "OK", data=None, status_code: int = 200):
-    return JSONResponse({"success": True, "message": message, "data": data}, status_code=status_code)
+    """Return success response"""
+    return JSONResponse({
+        "success": True, 
+        "message": message, 
+        "data": data
+    }, status_code=status_code)
 
 def bad(status_code: int, code: str, message: str, details=None):
-    return JSONResponse({"success": False, "error": {"code": code, "message": message, "details": details}}, status_code=status_code)
+    """Return error response"""
+    return JSONResponse({
+        "success": False, 
+        "error": {
+            "code": code, 
+            "message": message, 
+            "details": details
+        }
+    }, status_code=status_code)
 
-def sign_jwt(payload: dict) -> str:
-    exp = datetime.utcnow() + timedelta(hours=JWT_EXPIRES_HOURS)
-    payload.update({"exp": exp})
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+def get_env_var(key: str, default: str = None, required: bool = False):
+    """Get environment variable with optional validation"""
+    value = os.getenv(key, default)
+    if required and not value:
+        raise ValueError(f"Required environment variable {key} is not set")
+    return value
 
-def verify_jwt(token: str) -> dict:
-    try:
-        return jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Invalid token: {e}")
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(bearer_scheme)):
-    if not credentials or credentials.scheme.lower() != "bearer":
-        raise HTTPException(status_code=401, detail="Missing Bearer token")
-    token = credentials.credentials
-    return verify_jwt(token)
+def validate_email(email: str) -> bool:
+    """Basic email validation"""
+    import re
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None

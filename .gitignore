@@ -1,2 +1,44 @@
+# Environment files
 .env
+.env.local
+.env.*.local
+
+# Logs and temporary files
 *.log
+server.log
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Debug and test files
+debug_*.py
+test_*.py
+
+# Backup files
+*_backup.py
+*_old.py
+*_legacy.py
+*_dual.py
+
+# Setup files (after initial setup)
+setup_*.py
+*_setup.py
+cognito-policy.json
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

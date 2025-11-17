@@ -5,13 +5,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
-from . import auth
-from . import products
-from . import profiles
+from . import auth, products
 from .utils import ok, bad
 from .dynamodb_client import get_db_client
 
-# Force-load .env
 ROOT_ENV = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(dotenv_path=ROOT_ENV, override=True)
 
@@ -26,7 +23,6 @@ app = FastAPI(
     docs_url=f"{API_PREFIX}/docs",
 )
 
-# Add JWT Bearer security scheme to OpenAPI docs
 from fastapi.openapi.utils import get_openapi
 def custom_openapi():
     if app.openapi_schema:
@@ -79,18 +75,14 @@ def index():
         "docs": f"{API_PREFIX}/docs",
     })
 
-# Include routers
 app.include_router(auth.router, prefix=API_PREFIX)
-app.include_router(profiles.router, prefix=API_PREFIX)
 app.include_router(products.router, prefix=API_PREFIX)
 
-# Error handler
 @app.exception_handler(Exception)
 async def on_exception(_req: Request, exc: Exception):
     print("Unhandled error:", repr(exc))
     return bad(500, "SERVER_ERROR", "Something went wrong", str(exc))
 
-# Startup probe and DynamoDB health check
 @app.on_event("startup")
 async def startup_probe():
     try:
@@ -110,10 +102,8 @@ async def startup_probe():
         print("⚠️  Application will continue but database operations may fail")
 
 
-# For AWS Lambda + API Gateway integration (if needed)
 try:
     from mangum import Mangum
     handler = Mangum(app)
 except ImportError:
-    # Mangum not available, skip Lambda handler
     pass

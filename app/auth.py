@@ -1,32 +1,28 @@
+"""
+Authentication routes using AWS Cognito
+Simplified version with only signup and login
+"""
+
 import os
-import hashlib
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from .utils import ok, bad, sign_jwt
-from .dynamodb_client import get_db_client
+from .utils import ok, bad
+from .cognito_client import get_cognito_client
 
-# ─────────────────────────────────────────────
-# DynamoDB client setup
-# ─────────────────────────────────────────────
-try:
-    db = get_db_client()
-except Exception as e:
-    raise RuntimeError(f"Failed to connect to DynamoDB: {e}")
-
+security = HTTPBearer()
 router = APIRouter(prefix="/auth", tags=["Auth"])
+COGNITO_CONFIGURED = (
+    os.getenv('AWS_COGNITO_USER_POOL_ID') is not None and
+    os.getenv('AWS_COGNITO_CLIENT_ID') is not None
+)
 
-def hash_password(password: str) -> str:
-    """Hash password using SHA-256 with salt"""
-    salt = "inventory_api_salt_2024"  # In production, use individual salts
-    return hashlib.sha256((password + salt).encode()).hexdigest()
+if COGNITO_CONFIGURED:
+    print("🔐 Using AWS Cognito authentication")
+else:
+    print("⚠️ AWS Cognito not configured - authentication will fail")
+    print("   Please set AWS_COGNITO_USER_POOL_ID and AWS_COGNITO_CLIENT_ID environment variables")
 
-def verify_password(password: str, hashed: str) -> bool:
-    """Verify password against hash"""
-    return hash_password(password) == hashed
-
-# ─────────────────────────────────────────────
-# Schemas
-# ─────────────────────────────────────────────
 class SignupBody(BaseModel):
     email: str
     password: str
@@ -36,88 +32,83 @@ class LoginBody(BaseModel):
     email: str
     password: str
 
-# ─────────────────────────────────────────────
-# Signup - Create new user with DynamoDB
-# ─────────────────────────────────────────────
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get current user from Cognito JWT token"""
+    if not COGNITO_CONFIGURED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service not configured"
+        )
+    
+    try:
+        cognito = get_cognito_client()
+        result = cognito.verify_token(credentials.credentials)
+        
+        if not result['valid']:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=result.get('message', 'Invalid token'),
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        
+        return result['user']
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
 @router.post("/signup")
 def signup(body: SignupBody):
     """
-    Create a new user account in DynamoDB
+    Create a new user account with AWS Cognito
     """
+    if not COGNITO_CONFIGURED:
+        return bad(503, "SERVICE_UNAVAILABLE", "Authentication service not configured")
+    
     try:
-        # Check if user already exists
-        existing_user = db.get_user_by_email(body.email)
-        if existing_user:
-            return bad(400, "USER_EXISTS", "User with this email already exists")
-        
-        # Hash password
-        password_hash = hash_password(body.password)
-        
-        # Create user profile
-        user = db.create_user_profile(
+        cognito = get_cognito_client()
+        result = cognito.sign_up(
             email=body.email,
+            password=body.password,
             name=body.name,
-            password_hash=password_hash
+            role="USER"
         )
         
-        # Generate JWT token
-        token = sign_jwt({
-            "id": user["id"],
-            "email": user["email"],
-            "role": "USER"
-        })
-        
-        return ok("User created successfully", {
-            "token": token,
-            "user": {
-                "id": user["id"],
-                "email": user["email"],
-                "name": user["name"],
-                "created_at": user["created_at"]
-            }
-        })
-        
-    except ValueError as e:
-        return bad(400, "SIGNUP_FAILED", str(e))
+        if result['success']:
+            return ok(result['message'], {
+                "token": result.get('token'),
+                "user": result['user'],
+                "requires_confirmation": result.get('requires_confirmation', False)
+            })
+        else:
+            return bad(400, result.get('error', 'SIGNUP_FAILED'), result['message'])
+            
     except Exception as e:
         return bad(500, "SIGNUP_EXCEPTION", "Unexpected error during signup", str(e))
 
-# ─────────────────────────────────────────────
-# Login - Authenticate user with DynamoDB
-# ─────────────────────────────────────────────
-@router.post("/login")
+@router.post("/login") 
 def login(body: LoginBody):
     """
-    Authenticate user with email and password
+    Authenticate user with email and password using AWS Cognito
     """
+    if not COGNITO_CONFIGURED:
+        return bad(503, "SERVICE_UNAVAILABLE", "Authentication service not configured")
+    
     try:
-        # Find user by email
-        user = db.get_user_by_email(body.email)
-        if not user:
-            return bad(401, "INVALID_CREDENTIALS", "Invalid email or password")
+        cognito = get_cognito_client()
+        result = cognito.login(body.email, body.password)
         
-        # Verify password
-        if not user.get("password_hash"):
-            return bad(401, "INVALID_CREDENTIALS", "Account not properly configured")
-        
-        if not verify_password(body.password, user["password_hash"]):
-            return bad(401, "INVALID_CREDENTIALS", "Invalid email or password")
-        
-        # Generate JWT token
-        token = sign_jwt({
-            "id": user["id"],
-            "email": user["email"],
-            "role": "USER"
-        })
-        
-        return ok("Login successful", {
-            "token": token,
-            "user": {
-                "id": user["id"],
-                "email": user["email"],
-                "name": user["name"]
-            }
-        })
-        
+        if result['success']:
+            return ok(result['message'], {
+                "token": result['token'],
+                "refresh_token": result.get('refresh_token'),
+                "expires_in": result.get('expires_in'),
+                "user": result['user']
+            })
+        else:
+            return bad(401, result.get('error', 'LOGIN_FAILED'), result['message'])
+                
     except Exception as e:
         return bad(500, "LOGIN_EXCEPTION", "Unexpected error during login", str(e))

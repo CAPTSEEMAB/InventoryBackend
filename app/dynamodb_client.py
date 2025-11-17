@@ -12,7 +12,6 @@ from botocore.exceptions import ClientError
 from decimal import Decimal
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 class DynamoDBClient:
@@ -32,7 +31,6 @@ class DynamoDBClient:
             region_name=self.aws_region
         )
         
-        # Table references
         self.user_profiles = self.dynamodb.Table('user_profiles')
         self.inventory_products = self.dynamodb.Table('inventory_products')
     
@@ -61,9 +59,7 @@ class DynamoDBClient:
         else:
             return item
     
-    # ==========================================
-    # USER PROFILES OPERATIONS
-    # ==========================================
+
     
     def create_user_profile(self, email: str, name: str, password_hash: str = None) -> Dict:
         """Create a new user profile"""
@@ -117,7 +113,6 @@ class DynamoDBClient:
         timestamp = datetime.utcnow().isoformat() + 'Z'
         updates['updated_at'] = timestamp
         
-        # Build update expression
         update_expr = "SET "
         expr_attr_values = {}
         expr_attr_names = {}
@@ -151,9 +146,7 @@ class DynamoDBClient:
         except ClientError:
             return False
     
-    # ==========================================
-    # INVENTORY PRODUCTS OPERATIONS
-    # ==========================================
+
     
     def create_product(self, product_data: Dict) -> Dict:
         """Create a new inventory product"""
@@ -223,7 +216,6 @@ class DynamoDBClient:
         timestamp = datetime.utcnow().isoformat() + 'Z'
         updates['updated_at'] = timestamp
         
-        # Build update expression
         update_expr = "SET "
         expr_attr_values = {}
         expr_attr_names = {}
@@ -264,12 +256,11 @@ class DynamoDBClient:
         
         movement = {
             'movement_date': date,
-            'type': movement_type,  # 'IN' or 'OUT'
+            'type': movement_type,
             'quantity': quantity
         }
         
         try:
-            # Get current product to update movements
             product = self.get_product_by_id(product_id)
             if not product:
                 return False
@@ -277,14 +268,12 @@ class DynamoDBClient:
             movements = product.get('movements', [])
             movements.append(movement)
             
-            # Update stock quantity
             current_stock = product.get('in_stock', 0)
             if movement_type == 'IN':
                 new_stock = current_stock + quantity
-            else:  # 'OUT'
+            else:
                 new_stock = max(0, current_stock - quantity)
             
-            # Update product with new movement and stock
             self.update_product(product_id, {
                 'movements': movements,
                 'in_stock': new_stock
@@ -294,18 +283,14 @@ class DynamoDBClient:
         except ClientError:
             return False
     
-    # ==========================================
-    # UTILITY METHODS
-    # ==========================================
+
     
     def health_check(self) -> Dict:
         """Check database connection and table status"""
         try:
-            # Test user_profiles table
             user_response = self.user_profiles.scan(Limit=1)
             user_count = user_response['Count']
             
-            # Test inventory_products table
             product_response = self.inventory_products.scan(Limit=1)
             product_count = product_response['Count']
             
@@ -321,7 +306,6 @@ class DynamoDBClient:
                 'error': str(e)
             }
 
-# Global DynamoDB client instance
 db_client = None
 
 def get_db_client() -> DynamoDBClient:
