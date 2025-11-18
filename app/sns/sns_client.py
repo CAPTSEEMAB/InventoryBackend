@@ -47,10 +47,8 @@ class SNSClient(NotificationProvider):
             return response.get('MessageId') is not None
             
         except ClientError as e:
-            print(f"SNS publish error: {e}")
             return False
         except Exception as e:
-            print(f"Unexpected error in SNS publish: {e}")
             return False
     
     def _get_or_create_topic(self, topic_name: str) -> str:
@@ -66,5 +64,4 @@ class SNSClient(NotificationProvider):
             return topic_arn
             
         except ClientError as e:
-            print(f"SNS topic error: {e}")
             return ""

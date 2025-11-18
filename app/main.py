@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
-from . import auth, products
+from . import auth, products, s3_routes
 from .utils import ok, bad
 from .dynamodb_client import get_db_client
 
@@ -72,44 +72,38 @@ def index():
             f"{API_PREFIX}/products/by-category/{{category}}",
             f"{API_PREFIX}/products/by-sku/{{sku}}"
         ],
+        "s3": [
+            f"{API_PREFIX}/s3",
+            f"{API_PREFIX}/s3/upload",
+            f"{API_PREFIX}/s3/files",
+            f"{API_PREFIX}/s3/download/{{file_key}}",
+            f"{API_PREFIX}/s3/stats"
+        ],
         "docs": f"{API_PREFIX}/docs",
     })
 
 app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(products.router, prefix=API_PREFIX)
+app.include_router(s3_routes.router, prefix=API_PREFIX)
 
 @app.exception_handler(Exception)
 async def on_exception(_req: Request, exc: Exception):
-    print("Unhandled error:", repr(exc))
     return bad(500, "SERVER_ERROR", "Something went wrong", str(exc))
 
 @app.on_event("startup")
 async def startup_probe():
     try:
-        print("🟡 Checking DynamoDB connection...")
         db = get_db_client()
         health = db.health_check()
         
-        if health['status'] == 'healthy':
-            print(f"✅ {health['user_profiles']}")
-            print(f"✅ {health['inventory_products']}")
-            print(f"✅ Region: {health['region']}")
-        else:
-            print(f"❌ DynamoDB health check failed: {health.get('error', 'Unknown error')}")
-        
-        # Initialize SNS auto-subscription for all users
-        print("🟡 Initializing SNS notification system...")
         try:
             from .sns import ProductNotificationService
             notification_service = ProductNotificationService()
-            print("✅ SNS notification system initialized with auto-subscription")
         except Exception as sns_error:
-            print(f"⚠️  SNS initialization failed: {sns_error}")
-            print("⚠️  Notifications may not work properly")
+            pass
             
     except Exception as e:
-        print(f"❌ Startup check failed: {e}")
-        print("⚠️  Application will continue but database operations may fail")
+        pass
 
 
 try:

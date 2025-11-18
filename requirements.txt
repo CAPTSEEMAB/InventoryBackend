@@ -8,3 +8,4 @@ mangum>=0.19
 requests>=2.32
 warrant-lite>=1.0.4
 PyJWT[crypto]>=2.8.0
+python-multipart>=0.0.6

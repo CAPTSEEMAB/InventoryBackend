@@ -17,11 +17,7 @@ COGNITO_CONFIGURED = (
     os.getenv('AWS_COGNITO_CLIENT_ID') is not None
 )
 
-if COGNITO_CONFIGURED:
-    print("🔐 Using AWS Cognito authentication")
-else:
-    print("⚠️ AWS Cognito not configured - authentication will fail")
-    print("   Please set AWS_COGNITO_USER_POOL_ID and AWS_COGNITO_CLIENT_ID environment variables")
+
 
 class SignupBody(BaseModel):
     email: str
@@ -105,11 +101,9 @@ def signup(body: SignupBody):
                     Protocol='email',
                     Endpoint=body.email
                 )
-                print(f"✅ Auto-subscribed new user to notifications: {body.email}")
                 
             except Exception as sns_error:
-                print(f"⚠️ Failed to auto-subscribe user to notifications: {sns_error}")
-                # Don't fail signup if SNS subscription fails
+                pass
             
             return ok(result['message'], {
                 "token": result.get('token'),

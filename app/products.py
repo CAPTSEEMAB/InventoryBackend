@@ -60,8 +60,7 @@ def create_product(body: ProductCreate, current=Depends(get_current_user)):
         try:
             notification_service.notify_product_created(product)
         except Exception as notification_error:
-            # Log notification error but don't fail the product creation
-            print(f"Warning: Failed to send product creation notification: {notification_error}")
+            pass
         
         return ok("Product created successfully", product, status_code=201)
         

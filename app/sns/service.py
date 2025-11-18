@@ -29,8 +29,6 @@ class ProductNotificationService:
         )
         self.user_pool_id = os.getenv('AWS_COGNITO_USER_POOL_ID')
         
-        # Debug: Print configuration
-        print(f"🔧 SNS Service initialized with User Pool: {self.user_pool_id}")
         
         # Auto-subscribe all existing users on initialization
         if self.enabled:
@@ -50,11 +48,9 @@ class ProductNotificationService:
                             emails.append(attr['Value'])
                             break
             
-            print(f"📧 Found {len(emails)} registered users: {emails}")
             return emails
             
         except Exception as e:
-            print(f"❌ Error getting user emails: {e}")
             return []
     
     def subscribe_user(self, email: str) -> bool:
@@ -62,7 +58,6 @@ class ProductNotificationService:
         try:
             topic_arn = self.sns_client._get_or_create_topic("product-notifications")
             if not topic_arn:
-                print(f"❌ Could not create/get SNS topic for {email}")
                 return False
             
             # Check if already subscribed
@@ -76,23 +71,18 @@ class ProductNotificationService:
                     Protocol='email',
                     Endpoint=email
                 )
-                print(f"✅ Successfully subscribed: {email}")
                 return True
             else:
-                print(f"🔄 User already subscribed: {email}")
                 return True
                 
         except Exception as e:
-            print(f"❌ Failed to subscribe {email}: {e}")
             return False
     
     def _auto_subscribe_all_users(self) -> bool:
         """Private method to auto-subscribe all users during service initialization"""
         try:
-            print("🚀 Auto-subscribing all registered users to notifications...")
             return self.subscribe_all_users()
         except Exception as e:
-            print(f"⚠️ Auto-subscription failed (continuing anyway): {e}")
             return False
     
     def subscribe_all_users(self) -> bool:
@@ -100,12 +90,10 @@ class ProductNotificationService:
         try:
             emails = self.get_all_user_emails()
             if not emails:
-                print("⚠️ No users found to subscribe")
                 return False
             
             topic_arn = self.sns_client._get_or_create_topic("product-notifications")
             if not topic_arn:
-                print("❌ Could not create/get SNS topic")
                 return False
             
             subscribed_count = 0
@@ -122,19 +110,14 @@ class ProductNotificationService:
                             Protocol='email',
                             Endpoint=email
                         )
-                        print(f"✅ Subscribed: {email}")
                         subscribed_count += 1
-                    else:
-                        print(f"🔄 Already subscribed: {email}")
                         
                 except Exception as e:
-                    print(f"❌ Failed to subscribe {email}: {e}")
+                    pass
             
-            print(f"📊 Total subscriptions processed: {subscribed_count} new, {len(emails) - subscribed_count} existing")
             return True
             
         except Exception as e:
-            print(f"❌ Error subscribing users: {e}")
             return False
     
     def notify_product_created(self, product_data: dict) -> bool:
@@ -178,5 +161,4 @@ class ProductNotificationService:
             )
             
         except Exception as e:
-            print(f"Error sending product notification: {e}")
             return False
