@@ -96,6 +96,16 @@ async def startup_probe():
             print(f"✅ Region: {health['region']}")
         else:
             print(f"❌ DynamoDB health check failed: {health.get('error', 'Unknown error')}")
+        
+        # Initialize SNS auto-subscription for all users
+        print("🟡 Initializing SNS notification system...")
+        try:
+            from .sns import ProductNotificationService
+            notification_service = ProductNotificationService()
+            print("✅ SNS notification system initialized with auto-subscription")
+        except Exception as sns_error:
+            print(f"⚠️  SNS initialization failed: {sns_error}")
+            print("⚠️  Notifications may not work properly")
             
     except Exception as e:
         print(f"❌ Startup check failed: {e}")

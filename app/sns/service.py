@@ -14,7 +14,7 @@ load_dotenv(dotenv_path=ROOT_ENV, override=True)
 
 
 class ProductNotificationService:
-    """Service for sending product notifications to ALL registered users"""
+    """Service for sending product notifications to ALL registered users with auto-subscription"""
     
     def __init__(self):
         self.sns_client = SNSClient()
@@ -31,6 +31,10 @@ class ProductNotificationService:
         
         # Debug: Print configuration
         print(f"🔧 SNS Service initialized with User Pool: {self.user_pool_id}")
+        
+        # Auto-subscribe all existing users on initialization
+        if self.enabled:
+            self._auto_subscribe_all_users()
     
     def get_all_user_emails(self) -> list:
         """Get all registered user emails from Cognito"""
@@ -52,6 +56,44 @@ class ProductNotificationService:
         except Exception as e:
             print(f"❌ Error getting user emails: {e}")
             return []
+    
+    def subscribe_user(self, email: str) -> bool:
+        """Subscribe a single user to product notifications"""
+        try:
+            topic_arn = self.sns_client._get_or_create_topic("product-notifications")
+            if not topic_arn:
+                print(f"❌ Could not create/get SNS topic for {email}")
+                return False
+            
+            # Check if already subscribed
+            subs_response = self.sns_client.sns_client.list_subscriptions_by_topic(TopicArn=topic_arn)
+            existing_emails = [sub['Endpoint'] for sub in subs_response.get('Subscriptions', [])]
+            
+            if email not in existing_emails:
+                # Subscribe the email
+                self.sns_client.sns_client.subscribe(
+                    TopicArn=topic_arn,
+                    Protocol='email',
+                    Endpoint=email
+                )
+                print(f"✅ Successfully subscribed: {email}")
+                return True
+            else:
+                print(f"🔄 User already subscribed: {email}")
+                return True
+                
+        except Exception as e:
+            print(f"❌ Failed to subscribe {email}: {e}")
+            return False
+    
+    def _auto_subscribe_all_users(self) -> bool:
+        """Private method to auto-subscribe all users during service initialization"""
+        try:
+            print("🚀 Auto-subscribing all registered users to notifications...")
+            return self.subscribe_all_users()
+        except Exception as e:
+            print(f"⚠️ Auto-subscription failed (continuing anyway): {e}")
+            return False
     
     def subscribe_all_users(self) -> bool:
         """Subscribe all registered users to product notifications"""

@@ -80,21 +80,26 @@ def signup(body: SignupBody):
             # Auto-subscribe new user to product notifications
             try:
                 from .sns import ProductNotificationService
-                notification_service = ProductNotificationService()
                 
-                # Subscribe the new user's email to SNS notifications
-                import boto3
+                # Create a temporary service instance to subscribe new user
+                # Note: This won't trigger auto-subscription of all users since it's just for one user
                 import os
-                sns_client = boto3.client('sns',
-                                        aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-                                        aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-                                        region_name=os.getenv('AWS_SNS_REGION'))
+                temp_service = ProductNotificationService.__new__(ProductNotificationService)
+                temp_service.sns_client = temp_service.__class__.__dict__['__init__'].__defaults__[0] if hasattr(temp_service.__class__.__dict__['__init__'], '__defaults__') else None
                 
-                # Create/get the topic
+                # Simple direct subscription approach
+                import boto3
+                sns_client = boto3.client(
+                    'sns',
+                    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+                    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+                    region_name=os.getenv('AWS_SNS_REGION', 'us-east-1')
+                )
+                
+                # Create/get topic and subscribe
                 topic_response = sns_client.create_topic(Name='product-notifications')
                 topic_arn = topic_response['TopicArn']
                 
-                # Subscribe the new user
                 sns_client.subscribe(
                     TopicArn=topic_arn,
                     Protocol='email',
