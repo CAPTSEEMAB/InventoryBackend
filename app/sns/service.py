@@ -1,5 +1,5 @@
 """
-Product notification service for ALL users
+Product notification service for ALL users with SQS integration
 """
 
 import os
@@ -19,6 +19,7 @@ class ProductNotificationService:
     def __init__(self):
         self.sns_client = SNSClient()
         self.enabled = os.getenv('SNS_ENABLE_NOTIFICATIONS', 'true').lower() == 'true'
+        self.use_sqs = os.getenv('SQS_ENABLE_NOTIFICATIONS', 'true').lower() == 'true'
         
         # Initialize Cognito client to get all users
         self.cognito_client = boto3.client(
@@ -29,6 +30,14 @@ class ProductNotificationService:
         )
         self.user_pool_id = os.getenv('AWS_COGNITO_USER_POOL_ID')
         
+        # Initialize SQS notification service if enabled
+        if self.use_sqs:
+            try:
+                from ..sqs.notification_queue import NotificationQueueService
+                self.notification_queue = NotificationQueueService()
+            except Exception:
+                self.use_sqs = False
+                self.notification_queue = None
         
         # Auto-subscribe all existing users on initialization
         if self.enabled:
@@ -154,11 +163,43 @@ class ProductNotificationService:
 🛒 This notification was sent automatically to all users in the inventory system.
             """.strip()
             
-            return self.sns_client.publish_message(
-                topic="product-notifications",
-                message=message,
-                subject=subject
-            )
+            # Use SQS for reliable delivery if enabled
+            if self.use_sqs and self.notification_queue:
+                return self._send_via_sqs_queue(all_emails, subject, message)
+            else:
+                # Fallback to direct SNS
+                return self.sns_client.publish_message(
+                    topic="product-notifications",
+                    message=message,
+                    subject=subject
+                )
+            
+        except Exception as e:
+            return False
+    
+    def _send_via_sqs_queue(self, recipient_emails: list, subject: str, message: str) -> bool:
+        """Send notifications via SQS for reliable delivery with retry logic"""
+        try:
+            from ..sqs.interfaces import NotificationPayload
+            
+            success_count = 0
+            
+            # Queue notification for each user
+            for email in recipient_emails:
+                notification = NotificationPayload(
+                    recipient_email=email,
+                    subject=subject,
+                    message=message,
+                    notification_type="product_notification"
+                )
+                
+                # Queue with normal priority
+                if self.notification_queue.queue_notification(notification, priority="normal"):
+                    success_count += 1
+            
+            # Consider successful if we queued for at least 80% of users
+            success_rate = success_count / max(len(recipient_emails), 1)
+            return success_rate >= 0.8
             
         except Exception as e:
             return False

@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
-from . import auth, products, s3_routes
+from . import auth, products, s3_routes, sqs_routes
 from .utils import ok, bad
 from .dynamodb_client import get_db_client
 
@@ -79,12 +79,20 @@ def index():
             f"{API_PREFIX}/s3/download/{{file_key}}",
             f"{API_PREFIX}/s3/stats"
         ],
+        "sqs": [
+            f"{API_PREFIX}/sqs",
+            f"{API_PREFIX}/sqs/stats",
+            f"{API_PREFIX}/sqs/notification",
+            f"{API_PREFIX}/sqs/worker/stats",
+            f"{API_PREFIX}/sqs/health"
+        ],
         "docs": f"{API_PREFIX}/docs",
     })
 
 app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(products.router, prefix=API_PREFIX)
 app.include_router(s3_routes.router, prefix=API_PREFIX)
+app.include_router(sqs_routes.router, prefix=API_PREFIX)
 
 @app.exception_handler(Exception)
 async def on_exception(_req: Request, exc: Exception):
@@ -92,16 +100,15 @@ async def on_exception(_req: Request, exc: Exception):
 
 @app.on_event("startup")
 async def startup_probe():
+    # Simplified startup - services will be initialized on first use
+    pass
+
+
+@app.on_event("shutdown")
+async def shutdown_probe():
     try:
-        db = get_db_client()
-        health = db.health_check()
-        
-        try:
-            from .sns import ProductNotificationService
-            notification_service = ProductNotificationService()
-        except Exception as sns_error:
-            pass
-            
+        from .sqs.worker import stop_background_worker
+        stop_background_worker()
     except Exception as e:
         pass
 

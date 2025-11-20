@@ -5,7 +5,7 @@
 
 # Logs and temporary files
 *.log
-server.log
+server*.log
 
 # Python cache
 __pycache__/
