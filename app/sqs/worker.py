@@ -54,11 +54,14 @@ class NotificationWorker:
     async def _process_batch(self):
         """Process a batch of notifications"""
         try:
-            # Process notifications synchronously (since boto3 is sync)
-            results = await asyncio.to_thread(
-                self.notification_service.process_queued_notifications,
-                self.batch_size
-            )
+            # Process notifications in a thread pool to avoid blocking
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    self.notification_service.process_queued_notifications,
+                    self.batch_size
+                )
+                results = future.result(timeout=30)  # 30 second timeout
             
             # Update statistics
             self.stats["last_batch_time"] = datetime.now()
@@ -69,7 +72,7 @@ class NotificationWorker:
             self.stats["total_retried"] += results.get("retried", 0)
             
         except Exception as e:
-            pass
+            self.stats["total_failed"] += 1
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""

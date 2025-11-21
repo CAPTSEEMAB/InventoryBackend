@@ -12,8 +12,8 @@ from .dynamodb_client import get_db_client
 ROOT_ENV = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(dotenv_path=ROOT_ENV, override=True)
 
-PORT = int(os.getenv("PORT", 3000))
-API_PREFIX = os.getenv("API", "/api")
+PORT = int(os.getenv("PORT", 8000))
+API_PREFIX = os.getenv("API_PREFIX", "/api")
 
 app = FastAPI(
     title="Inventory Shop API",
