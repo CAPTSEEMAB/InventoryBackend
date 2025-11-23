@@ -100,8 +100,18 @@ async def on_exception(_req: Request, exc: Exception):
 
 @app.on_event("startup")
 async def startup_probe():
-    # Simplified startup - services will be initialized on first use
-    pass
+    """Initialize services on startup"""
+    try:
+        # Start the background worker for processing SQS notifications
+        from .sqs.worker import start_background_worker
+        import asyncio
+        
+        # Start worker in background without blocking startup
+        asyncio.create_task(start_background_worker(batch_size=10, polling_interval=5))
+        print("✅ Background notification worker started successfully")
+    except Exception as e:
+        print(f"⚠️  Failed to start background worker: {e}")
+        # Don't fail startup if worker fails to start
 
 
 @app.on_event("shutdown")
