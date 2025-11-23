@@ -6,13 +6,13 @@ from pydantic import BaseModel, Field, HttpUrl
 from .utils import ok, bad
 from .auth import get_current_user
 from .dynamodb_client import get_db_client
-from .sns import ProductNotificationService
+from .notifications import get_notification_service
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
 try:
     db = get_db_client()
-    notification_service = ProductNotificationService()
+    notification = get_notification_service()
 except Exception as e:
     raise RuntimeError(f"Failed to initialize services: {e}")
 
@@ -48,6 +48,30 @@ def get_all_products(current=Depends(get_current_user)):
     except Exception as e:
         return bad(500, "DATABASE_ERROR", "Failed to fetch products", str(e))
 
+@router.get("/search")
+def search_products(query: str, current=Depends(get_current_user)):
+    """Search products by name, description, or category"""
+    try:
+        all_products = db.get_all_products(limit=1000)
+        
+        if not query:
+            return ok("Search results", all_products)
+        
+        query_lower = query.lower()
+        results = []
+        
+        for product in all_products:
+            if (query_lower in product.get("name", "").lower() or
+                query_lower in product.get("description", "").lower() or
+                query_lower in product.get("category", "").lower() or
+                query_lower in product.get("sku", "").lower()):
+                results.append(product)
+        
+        return ok(f"Found {len(results)} products", results)
+        
+    except Exception as e:
+        return bad(500, "DATABASE_ERROR", "Failed to search products", str(e))
+
 @router.post("/", status_code=201)
 def create_product(body: ProductCreate, current=Depends(get_current_user)):
     try:
@@ -56,11 +80,30 @@ def create_product(body: ProductCreate, current=Depends(get_current_user)):
         
         product = db.create_product(product_data)
         
-        # Send SNS notification for new product creation
+        # Send notification via SQS → SNS flow
         try:
-            notification_service.notify_product_created(product)
+            notification_data = {
+                **product,
+                "created_by": current.get("email", "Unknown"),
+                "created_by_name": current.get("name", "Unknown User")
+            }
+            
+            result = notification.notify(
+                action="created",
+                resource="product",
+                data=notification_data,
+                priority="normal"
+            )
+            
+            if result:
+                print(f"✅ Notification queued to SQS: {product.get('name')}")
+            else:
+                print(f"⚠️ Notification queueing failed: {product.get('name')}")
+                
         except Exception as notification_error:
-            pass
+            print(f"❌ Notification exception: {notification_error}")
+            import traceback
+            traceback.print_exc()
         
         return ok("Product created successfully", product, status_code=201)
         
@@ -97,6 +140,18 @@ def update_product_by_id(product_id: str, body: ProductUpdate, current=Depends(g
             return bad(400, "NO_DATA", "No update data provided")
         
         updated_product = db.update_product(product_id, update_data)
+        
+        # Send notification for product update
+        try:
+            notification.notify(
+                action="updated",
+                resource="product",
+                data=updated_product,
+                priority="normal"
+            )
+        except Exception:
+            pass
+        
         return ok("Product updated successfully", updated_product)
         
     except ValueError as e:
@@ -111,6 +166,22 @@ def delete_product_by_id(product_id: str, current=Depends(get_current_user)):
         existing_product = db.get_product_by_id(product_id)
         if not existing_product:
             return bad(404, "NOT_FOUND", "Product not found")
+        
+        # Send notification with deleter info before deletion
+        try:
+            notification_data = {
+                **existing_product,
+                "deleted_by": current.get("email", "Unknown"),
+                "deleted_by_name": current.get("name", "Unknown User")
+            }
+            notification.notify(
+                action="deleted",
+                resource="product",
+                data=notification_data,
+                priority="high"  # High priority for deletions
+            )
+        except Exception:
+            pass
         
         db.delete_product(product_id)
         return ok("Product deleted successfully", {"deleted_product_id": product_id})

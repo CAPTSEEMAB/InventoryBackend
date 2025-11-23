@@ -118,19 +118,25 @@ class NotificationQueueService:
             True if sent successfully, False otherwise
         """
         try:
-            # Import here to avoid circular imports
-            from ..sns.service import ProductNotificationService
+            # Send email via SNS directly
+            import boto3
+            import os
             
-            sns_service = ProductNotificationService()
+            sns_client = boto3.client('sns',
+                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+                region_name=os.getenv('AWS_REGION', 'us-east-1'))
             
-            # Convert notification to SNS format
-            success = sns_service._send_email_notification(
-                email=notification.recipient_email,
-                subject=notification.subject,
-                message=notification.message
+            topic_arn = os.getenv('SNS_TOPIC_ARN')
+            
+            # Publish to SNS topic
+            response = sns_client.publish(
+                TopicArn=topic_arn,
+                Subject=notification.subject,
+                Message=notification.message
             )
             
-            return success
+            return response.get('MessageId') is not None
             
         except Exception as e:
             return False
@@ -262,18 +268,24 @@ class NotificationQueueService:
             topic_arn = self._get_sns_topic_arn(topic_name)
             
             if not topic_arn:
+                print(f"❌ SNS topic ARN not found for: {topic_name}")
                 return False
             
             # Publish to SNS topic (which delivers to email subscribers)
-            sns_client.publish(
+            response = sns_client.publish(
                 TopicArn=topic_arn,
                 Subject=notification.subject,
                 Message=notification.message
             )
             
+            print(f"✅ SNS notification sent! MessageId: {response['MessageId']}")
+            print(f"   Subject: {notification.subject}")
+            print(f"   To: {notification.recipient_email}")
+            
             return True
             
         except Exception as e:
+            print(f"❌ SNS publish failed: {str(e)}")
             return False
     
     def _get_sns_topic_arn(self, topic_name: str) -> Optional[str]:

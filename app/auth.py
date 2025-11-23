@@ -75,16 +75,9 @@ def signup(body: SignupBody):
         if result['success']:
             # Auto-subscribe new user to product notifications
             try:
-                from .sns import ProductNotificationService
-                
-                # Create a temporary service instance to subscribe new user
-                # Note: This won't trigger auto-subscription of all users since it's just for one user
-                import os
-                temp_service = ProductNotificationService.__new__(ProductNotificationService)
-                temp_service.sns_client = temp_service.__class__.__dict__['__init__'].__defaults__[0] if hasattr(temp_service.__class__.__dict__['__init__'], '__defaults__') else None
-                
                 # Simple direct subscription approach
                 import boto3
+                import os
                 sns_client = boto3.client(
                     'sns',
                     aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
