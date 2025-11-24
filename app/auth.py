@@ -1,8 +1,3 @@
-"""
-Authentication routes using AWS Cognito
-Simplified version with only signup and login
-"""
-
 import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -29,7 +24,6 @@ class LoginBody(BaseModel):
     password: str
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Get current user from Cognito JWT token"""
     if not COGNITO_CONFIGURED:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -57,9 +51,6 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 @router.post("/signup")
 def signup(body: SignupBody):
-    """
-    Create a new user account with AWS Cognito and auto-subscribe to notifications
-    """
     if not COGNITO_CONFIGURED:
         return bad(503, "SERVICE_UNAVAILABLE", "Authentication service not configured")
     
@@ -73,9 +64,7 @@ def signup(body: SignupBody):
         )
         
         if result['success']:
-            # Auto-subscribe new user to product notifications
             try:
-                # Simple direct subscription approach
                 import boto3
                 import os
                 sns_client = boto3.client(
@@ -85,8 +74,8 @@ def signup(body: SignupBody):
                     region_name=os.getenv('AWS_SNS_REGION', 'us-east-1')
                 )
                 
-                # Create/get topic and subscribe
-                topic_response = sns_client.create_topic(Name='product-notifications')
+                topic_name = os.getenv('AWS_SNS_TOPIC_NAME', 'product-notifications')
+                topic_response = sns_client.create_topic(Name=topic_name)
                 topic_arn = topic_response['TopicArn']
                 
                 sns_client.subscribe(
@@ -111,9 +100,6 @@ def signup(body: SignupBody):
 
 @router.post("/login") 
 def login(body: LoginBody):
-    """
-    Authenticate user with email and password using AWS Cognito
-    """
     if not COGNITO_CONFIGURED:
         return bad(503, "SERVICE_UNAVAILABLE", "Authentication service not configured")
     

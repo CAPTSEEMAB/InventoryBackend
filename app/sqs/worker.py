@@ -1,8 +1,3 @@
-"""
-Background Worker for Processing SQS Notification Queue
-Runs continuously to process queued notifications with retry logic
-"""
-
 import asyncio
 import signal
 import sys
@@ -12,8 +7,6 @@ from .notification_queue import NotificationQueueService
 
 
 class NotificationWorker:
-    """Background worker for processing notification queue"""
-    
     def __init__(self, batch_size: int = 5, polling_interval: int = 10):
         self.notification_service = NotificationQueueService()
         self.batch_size = batch_size
@@ -30,14 +23,12 @@ class NotificationWorker:
         }
     
     async def start(self):
-        """Start the background worker"""
         if not self.notification_service.enabled:
             return
         
         self.running = True
         self.stats["start_time"] = datetime.now()
         
-        # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
         
@@ -52,18 +43,15 @@ class NotificationWorker:
             await self._shutdown()
     
     async def _process_batch(self):
-        """Process a batch of notifications"""
         try:
-            # Process notifications in a thread pool to avoid blocking
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(
                     self.notification_service.process_queued_notifications,
                     self.batch_size
                 )
-                results = future.result(timeout=30)  # 30 second timeout
+                results = future.result(timeout=30)
             
-            # Update statistics
             self.stats["last_batch_time"] = datetime.now()
             self.stats["last_batch_size"] = results.get("processed", 0)
             self.stats["total_processed"] += results.get("processed", 0)
@@ -75,15 +63,12 @@ class NotificationWorker:
             self.stats["total_failed"] += 1
     
     def _signal_handler(self, signum, frame):
-        """Handle shutdown signals"""
         self.running = False
     
     async def _shutdown(self):
-        """Graceful shutdown"""
         self.running = False
     
     def get_stats(self) -> Dict[str, Any]:
-        """Get worker statistics"""
         runtime = None
         if self.stats["start_time"]:
             runtime = datetime.now() - self.stats["start_time"]
@@ -111,12 +96,10 @@ class NotificationWorker:
         self.running = False
 
 
-# Global worker instance
 _worker_instance = None
 
 
 def get_notification_worker(batch_size: int = 5, polling_interval: int = 10) -> NotificationWorker:
-    """Get or create notification worker instance"""
     global _worker_instance
     if _worker_instance is None:
         _worker_instance = NotificationWorker(batch_size, polling_interval)
@@ -124,24 +107,19 @@ def get_notification_worker(batch_size: int = 5, polling_interval: int = 10) -> 
 
 
 async def start_background_worker(batch_size: int = 5, polling_interval: int = 10):
-    """Start the background notification worker"""
     worker = get_notification_worker(batch_size, polling_interval)
     await worker.start()
 
 
 def stop_background_worker():
-    """Stop the background notification worker"""
     global _worker_instance
     if _worker_instance:
         _worker_instance.stop()
 
 
-# CLI script for running worker standalone
 async def main():
-    """Main function for running worker as standalone script"""
     import os
     
-    # Configuration from environment
     batch_size = int(os.getenv('SQS_WORKER_BATCH_SIZE', '5'))
     polling_interval = int(os.getenv('SQS_WORKER_POLLING_INTERVAL', '10'))
     

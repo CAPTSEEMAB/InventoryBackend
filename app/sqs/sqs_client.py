@@ -1,7 +1,3 @@
-"""
-SQS Client Wrapper for Queue Operations
-"""
-
 import os
 import json
 import uuid
@@ -18,7 +14,6 @@ load_dotenv(dotenv_path=ROOT_ENV, override=True)
 
 
 class SQSClient:
-    """AWS SQS client wrapper with queue operations"""
     
     def __init__(self):
         self.sqs_client = boto3.client(
@@ -58,18 +53,6 @@ class SQSClient:
     
     def create_queue(self, queue_name: str, dead_letter_queue_arn: Optional[str] = None, 
                      visibility_timeout: int = 30, message_retention_period: int = 1209600) -> str:
-        """
-        Create SQS queue with optional dead letter queue
-        
-        Args:
-            queue_name: Name of the queue to create
-            dead_letter_queue_arn: ARN of dead letter queue
-            visibility_timeout: Message visibility timeout in seconds (default: 30)
-            message_retention_period: Message retention in seconds (default: 14 days)
-            
-        Returns:
-            Queue URL if successful
-        """
         try:
             existing_url = self._get_queue_url(queue_name)
             if existing_url:
@@ -101,17 +84,6 @@ class SQSClient:
             raise Exception(f"Failed to create queue {queue_name}: {e}")
     
     def send_message(self, queue_name: str, message: QueueMessage, delay_seconds: int = 0) -> bool:
-        """
-        Send message to SQS queue
-        
-        Args:
-            queue_name: Target queue name
-            message: Message to send
-            delay_seconds: Delivery delay in seconds
-            
-        Returns:
-            True if successful, False otherwise
-        """
         try:
             queue_url = self._get_queue_url(queue_name)
             if not queue_url:
@@ -146,17 +118,6 @@ class SQSClient:
     
     def receive_messages(self, queue_name: str, max_messages: int = 1, 
                         wait_time: int = 20) -> List[Dict[str, Any]]:
-        """
-        Receive messages from SQS queue
-        
-        Args:
-            queue_name: Source queue name
-            max_messages: Maximum messages to receive (1-10)
-            wait_time: Long polling wait time in seconds
-            
-        Returns:
-            List of message dictionaries with message data and receipt handles
-        """
         try:
             queue_url = self._get_queue_url(queue_name)
             if not queue_url:
@@ -196,16 +157,6 @@ class SQSClient:
             return []
     
     def delete_message(self, queue_name: str, receipt_handle: str) -> bool:
-        """
-        Delete message from queue after processing
-        
-        Args:
-            queue_name: Source queue name
-            receipt_handle: Message receipt handle
-            
-        Returns:
-            True if successful, False otherwise
-        """
         try:
             queue_url = self._get_queue_url(queue_name)
             if not queue_url:
@@ -224,15 +175,6 @@ class SQSClient:
             return False
     
     def get_queue_stats(self, queue_name: str) -> Optional[QueueStats]:
-        """
-        Get queue statistics
-        
-        Args:
-            queue_name: Queue name to get stats for
-            
-        Returns:
-            QueueStats object with queue metrics
-        """
         try:
             queue_url = self._get_queue_url(queue_name)
             if not queue_url:
@@ -259,15 +201,6 @@ class SQSClient:
             return None
     
     def purge_queue(self, queue_name: str) -> bool:
-        """
-        Purge all messages from queue (use with caution)
-        
-        Args:
-            queue_name: Queue to purge
-            
-        Returns:
-            True if successful, False otherwise
-        """
         try:
             queue_url = self._get_queue_url(queue_name)
             if not queue_url:
@@ -282,15 +215,6 @@ class SQSClient:
             return False
     
     def list_queues(self, prefix: str = "") -> List[str]:
-        """
-        List all queues with optional prefix filter
-        
-        Args:
-            prefix: Queue name prefix filter
-            
-        Returns:
-            List of queue names
-        """
         try:
             if prefix:
                 response = self.sqs_client.list_queues(QueueNamePrefix=prefix)

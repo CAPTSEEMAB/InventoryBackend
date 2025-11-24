@@ -1,8 +1,3 @@
-"""
-AWS S3 client wrapper for bulk data operations
-Handles file upload, download, listing, and deletion
-"""
-
 import os
 import boto3
 from typing import List, Dict, Optional, BinaryIO
@@ -15,18 +10,15 @@ ROOT_ENV = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=ROOT_ENV, override=True)
 
 
-class S3Client:
-    """AWS S3 client wrapper for bulk file operations"""
-    
+class S3Client:    
     def __init__(self):
-        """Initialize S3 client with AWS credentials"""
         self.aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
         self.aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
         self.aws_region = os.getenv('AWS_S3_REGION', 'us-east-1')
         self.bucket_name = os.getenv('AWS_S3_BUCKET_NAME')
         
         if not all([self.aws_access_key_id, self.aws_secret_access_key, self.bucket_name]):
-            raise ValueError("Missing required S3 configuration in environment variables")
+            raise ValueError("Missing S3 configuration in environment variables")
         
         self.s3_client = boto3.client(
             's3',
@@ -38,17 +30,6 @@ class S3Client:
 
     
     def upload_file(self, file_content: bytes, file_key: str, content_type: str = 'application/octet-stream') -> bool:
-        """
-        Upload file content to S3 bucket
-        
-        Args:
-            file_content: File content as bytes
-            file_key: S3 object key (file path in bucket)
-            content_type: MIME type of the file
-            
-        Returns:
-            bool: True if upload successful, False otherwise
-        """
         try:
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
@@ -64,15 +45,6 @@ class S3Client:
             return False
     
     def download_file(self, file_key: str) -> Optional[bytes]:
-        """
-        Download file content from S3 bucket
-        
-        Args:
-            file_key: S3 object key (file path in bucket)
-            
-        Returns:
-            bytes: File content if successful, None otherwise
-        """
         try:
             response = self.s3_client.get_object(Bucket=self.bucket_name, Key=file_key)
             content = response['Body'].read()
@@ -84,15 +56,6 @@ class S3Client:
             return None
     
     def list_files(self, prefix: str = '') -> List[Dict]:
-        """
-        List files in S3 bucket with optional prefix filter
-        
-        Args:
-            prefix: Filter files by prefix (folder path)
-            
-        Returns:
-            List[Dict]: List of file metadata
-        """
         try:
             response = self.s3_client.list_objects_v2(
                 Bucket=self.bucket_name,
@@ -117,15 +80,6 @@ class S3Client:
             return []
     
     def delete_file(self, file_key: str) -> bool:
-        """
-        Delete file from S3 bucket
-        
-        Args:
-            file_key: S3 object key (file path in bucket)
-            
-        Returns:
-            bool: True if deletion successful, False otherwise
-        """
         try:
             self.s3_client.delete_object(Bucket=self.bucket_name, Key=file_key)
             return True
@@ -136,15 +90,6 @@ class S3Client:
             return False
     
     def file_exists(self, file_key: str) -> bool:
-        """
-        Check if file exists in S3 bucket
-        
-        Args:
-            file_key: S3 object key (file path in bucket)
-            
-        Returns:
-            bool: True if file exists, False otherwise
-        """
         try:
             self.s3_client.head_object(Bucket=self.bucket_name, Key=file_key)
             return True
@@ -154,16 +99,6 @@ class S3Client:
             return False
     
     def get_file_url(self, file_key: str, expiration: int = 3600) -> Optional[str]:
-        """
-        Generate pre-signed URL for file access
-        
-        Args:
-            file_key: S3 object key (file path in bucket)
-            expiration: URL expiration time in seconds (default 1 hour)
-            
-        Returns:
-            str: Pre-signed URL if successful, None otherwise
-        """
         try:
             url = self.s3_client.generate_presigned_url(
                 'get_object',

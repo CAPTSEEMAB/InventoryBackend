@@ -12,10 +12,6 @@ class NotificationService:
         self.queue = NotificationQueueService()
     
     def notify(self, action: str, resource: str, data: Dict[str, Any], priority="normal"):
-        """
-        Send notification to ALL confirmed SNS subscribers
-        Queues ONE message that will be broadcast to all subscribers via SNS topic
-        """
         try:
             name = data.get('name', data.get('id', 'Item'))
             subject = f"{resource.title()} {action.title()}: {name}"
@@ -23,18 +19,17 @@ class NotificationService:
             message = f"{resource.upper()} {action.upper()}\n\n{details}"
             
             from ..sqs.interfaces import NotificationPayload
-            # Queue ONE notification - SNS will broadcast to all confirmed subscribers
             payload = NotificationPayload(
-                recipient_email="all_subscribers",  # Indicates broadcast to SNS topic
+                recipient_email="all_subscribers", 
                 subject=subject,
                 message=message,
                 notification_type="broadcast"
             )
             self.queue.queue_notification(payload, priority=priority)
-            print(f"📧 Notification queued: {subject}")
+            print(f"Notification queued: {subject}")
             return True
         except Exception as e:
-            print(f"❌ Failed to queue notification: {e}")
+            print(f"Failed to queue notification: {e}")
             return False
 
 _service = None

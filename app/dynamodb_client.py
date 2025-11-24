@@ -16,7 +16,8 @@ class DynamoDBClient:
             aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
             region_name=os.getenv('AWS_REGION', 'us-east-1')
         )
-        self.inventory_products = self.dynamodb.Table('inventory_products')
+        table_name = os.getenv('AWS_DYNAMODB_TABLE_NAME', 'inventory_products')
+        self.inventory_products = self.dynamodb.Table(table_name)
     
     def _convert_decimals(self, obj):
         if isinstance(obj, list):

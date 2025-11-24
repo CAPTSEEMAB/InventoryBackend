@@ -41,7 +41,6 @@ class ProductUpdate(BaseModel):
 
 @router.get("/")
 def get_all_products(current=Depends(get_current_user)):
-    """Get all products"""
     try:
         products = db.get_all_products(limit=100)
         return ok("Products fetched", products)
@@ -50,7 +49,6 @@ def get_all_products(current=Depends(get_current_user)):
 
 @router.get("/search")
 def search_products(query: str, current=Depends(get_current_user)):
-    """Search products by name, description, or category"""
     try:
         all_products = db.get_all_products(limit=1000)
         
@@ -80,7 +78,6 @@ def create_product(body: ProductCreate, current=Depends(get_current_user)):
         
         product = db.create_product(product_data)
         
-        # Send notification via SQS → SNS flow
         try:
             notification_data = {
                 **product,
@@ -96,12 +93,12 @@ def create_product(body: ProductCreate, current=Depends(get_current_user)):
             )
             
             if result:
-                print(f"✅ Notification queued to SQS: {product.get('name')}")
+                print(f"Notification queued to SQS: {product.get('name')}")
             else:
-                print(f"⚠️ Notification queueing failed: {product.get('name')}")
+                print(f"Notification queueing failed: {product.get('name')}")
                 
         except Exception as notification_error:
-            print(f"❌ Notification exception: {notification_error}")
+            print(f"Notification exception: {notification_error}")
             import traceback
             traceback.print_exc()
         
@@ -114,7 +111,6 @@ def create_product(body: ProductCreate, current=Depends(get_current_user)):
 
 @router.get("/{product_id}")
 def get_product_by_id(product_id: str, current=Depends(get_current_user)):
-    """Get a specific product by ID"""
     try:
         product = db.get_product_by_id(product_id)
         if not product:
@@ -127,7 +123,6 @@ def get_product_by_id(product_id: str, current=Depends(get_current_user)):
 
 @router.put("/{product_id}")
 def update_product_by_id(product_id: str, body: ProductUpdate, current=Depends(get_current_user)):
-    """Update a specific product by ID"""
     try:
         existing_product = db.get_product_by_id(product_id)
         if not existing_product:
@@ -161,13 +156,11 @@ def update_product_by_id(product_id: str, body: ProductUpdate, current=Depends(g
 
 @router.delete("/{product_id}")
 def delete_product_by_id(product_id: str, current=Depends(get_current_user)):
-    """Delete a specific product by ID"""
     try:
         existing_product = db.get_product_by_id(product_id)
         if not existing_product:
             return bad(404, "NOT_FOUND", "Product not found")
         
-        # Send notification with deleter info before deletion
         try:
             notification_data = {
                 **existing_product,

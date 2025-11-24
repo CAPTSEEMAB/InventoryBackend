@@ -1,7 +1,3 @@
-"""
-Notification Queue Service for reliable email delivery with retry logic
-Integrates with existing SNS system to provide guaranteed delivery
-"""
 
 import os
 import json
@@ -18,22 +14,20 @@ load_dotenv(dotenv_path=ROOT_ENV, override=True)
 
 
 class NotificationQueueService:
-    """Service for reliable notification delivery using SQS"""
     
     def __init__(self):
         self.sqs_client = SQSClient()
         self.enabled = os.getenv('SQS_ENABLE_NOTIFICATIONS', 'true').lower() == 'true'
         
-        # Queue names
-        self.notification_queue = 'notification-processing-queue'
-        self.dlq_queue = 'notification-dead-letter-queue'
+        # Queue names from environment variables
+        self.notification_queue = os.getenv('AWS_SQS_QUEUE_NAME', 'notification-processing-queue')
+        self.dlq_queue = os.getenv('AWS_SQS_DLQ_NAME', 'notification-dead-letter-queue')
         
         # Initialize queues if enabled
         if self.enabled:
             self._ensure_queues_exist()
     
     def _ensure_queues_exist(self):
-        """Ensure required queues exist"""
         try:
             # Create dead letter queue first
             dlq_url = self.sqs_client.create_queue(
@@ -57,7 +51,6 @@ class NotificationQueueService:
             pass
     
     def _get_queue_arn(self, queue_name: str) -> Optional[str]:
-        """Get queue ARN from queue name"""
         try:
             return f"arn:aws:sqs:{self.sqs_client.region}:{self.sqs_client.account_id}:{queue_name}"
         except Exception:
@@ -65,17 +58,7 @@ class NotificationQueueService:
     
     def queue_notification(self, notification: NotificationPayload, 
                           delay_seconds: int = 0, priority: str = "normal") -> bool:
-        """
-        Queue a notification for reliable delivery
-        
-        Args:
-            notification: Notification payload to queue
-            delay_seconds: Delay delivery by specified seconds
-            priority: Priority level (normal, high, low)
-            
-        Returns:
-            True if queued successfully, False otherwise
-        """
+      
         if not self.enabled:
             return self._send_direct_notification(notification)
         
@@ -108,15 +91,7 @@ class NotificationQueueService:
             return self._send_direct_notification(notification)
     
     def _send_direct_notification(self, notification: NotificationPayload) -> bool:
-        """
-        Fallback: Send notification directly without queue
-        
-        Args:
-            notification: Notification to send
-            
-        Returns:
-            True if sent successfully, False otherwise
-        """
+       
         try:
             # Send email via SNS directly
             import boto3
@@ -127,7 +102,7 @@ class NotificationQueueService:
                 aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
                 region_name=os.getenv('AWS_REGION', 'us-east-1'))
             
-            topic_arn = os.getenv('SNS_TOPIC_ARN')
+            topic_arn = os.getenv('AWS_SNS_TOPIC_ARN')
             
             # Publish to SNS topic
             response = sns_client.publish(
@@ -142,15 +117,7 @@ class NotificationQueueService:
             return False
     
     def process_queued_notifications(self, batch_size: int = 10) -> Dict[str, Any]:
-        """
-        Process a batch of queued notifications
-        
-        Args:
-            batch_size: Number of messages to process in this batch
-            
-        Returns:
-            Processing results summary
-        """
+      
         if not self.enabled:
             return {"status": "disabled", "processed": 0}
         
@@ -228,29 +195,11 @@ class NotificationQueueService:
             }
     
     def _calculate_retry_delay(self, retry_count: int) -> int:
-        """
-        Calculate exponential backoff delay for retries
-        
-        Args:
-            retry_count: Current retry attempt number
-            
-        Returns:
-            Delay in seconds
-        """
         # Exponential backoff: 30s, 2m, 8m
         base_delay = 30
         return min(base_delay * (2 ** (retry_count - 1)), 480)  # Max 8 minutes
     
     def _send_email_notification(self, notification: NotificationPayload) -> bool:
-        """
-        Send individual email notification using existing SNS infrastructure
-        
-        Args:
-            notification: Notification to send
-            
-        Returns:
-            True if sent successfully, False otherwise
-        """
         try:
             # Import here to avoid circular imports
             import boto3
@@ -263,8 +212,8 @@ class NotificationQueueService:
                 region_name=os.getenv('AWS_SNS_REGION', 'us-east-1')
             )
             
-            # Get the notification topic ARN
-            topic_name = "product-notifications"
+            # Get the notification topic name from environment
+            topic_name = os.getenv('AWS_SNS_TOPIC_NAME', 'product-notifications')
             topic_arn = self._get_sns_topic_arn(topic_name)
             
             if not topic_arn:
@@ -289,7 +238,6 @@ class NotificationQueueService:
             return False
     
     def _get_sns_topic_arn(self, topic_name: str) -> Optional[str]:
-        """Get SNS topic ARN"""
         try:
             import boto3
             
@@ -312,12 +260,6 @@ class NotificationQueueService:
             return None
     
     def get_queue_stats(self) -> Dict[str, Any]:
-        """
-        Get statistics for notification queues
-        
-        Returns:
-            Dictionary with queue statistics
-        """
         if not self.enabled:
             return {"status": "disabled"}
         
@@ -340,15 +282,6 @@ class NotificationQueueService:
             }
     
     def requeue_failed_messages(self, max_messages: int = 10) -> Dict[str, Any]:
-        """
-        Requeue messages from dead letter queue for retry
-        
-        Args:
-            max_messages: Maximum messages to requeue
-            
-        Returns:
-            Requeue results
-        """
         if not self.enabled:
             return {"status": "disabled", "requeued": 0}
         

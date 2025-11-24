@@ -1,14 +1,9 @@
-"""
-Interface definitions for SQS integration
-"""
-
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
 from datetime import datetime
 
 
 class QueueMessage(BaseModel):
-    """Standard queue message format"""
     id: str
     message_type: str
     payload: Dict[str, Any]
@@ -20,7 +15,6 @@ class QueueMessage(BaseModel):
 
 
 class NotificationPayload(BaseModel):
-    """Notification-specific payload"""
     recipient_email: str
     subject: str
     message: str
@@ -30,7 +24,6 @@ class NotificationPayload(BaseModel):
 
 
 class QueueStats(BaseModel):
-    """Queue statistics for monitoring"""
     queue_name: str
     visible_messages: int
     in_flight_messages: int

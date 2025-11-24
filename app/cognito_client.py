@@ -111,7 +111,6 @@ class CognitoClient:
             if not rsa_key:
                 return {'valid': False, 'message': 'Public key not found'}
             
-            # Access tokens don't have audience, so verify without it
             payload = jwt.decode(
                 token,
                 rsa_key,

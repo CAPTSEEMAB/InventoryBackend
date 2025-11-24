@@ -30,6 +30,6 @@ async def startup():
         from .sqs.worker import start_background_worker
         import asyncio
         asyncio.create_task(start_background_worker(batch_size=10, polling_interval=5))
-        print("✓ Background worker started for SQS/SNS notifications")
+        print("Background worker started for SQS/SNS notifications")
     except Exception as e:
-        print(f"⚠ Background worker not started: {e}")
+        print(f"Background worker not started: {e}")
